@@ -8,8 +8,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+
 	"backend/config"
+	"backend/internal/controller"
 	"backend/internal/middleware"
+	"backend/internal/repository"
+	"backend/internal/service"
 )
 
 type Server struct {
@@ -31,6 +35,8 @@ func NewServer(cfg *config.Config, logger *zap.Logger, db *sql.DB) *Server {
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	registerUserRoutes(router, cfg, db)
 
 	srv := &http.Server{
 		Addr:           ":" + cfg.ServerPort,
@@ -55,4 +61,13 @@ func (s *Server) Start() error {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.srv.Shutdown(ctx)
+}
+
+func registerUserRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB) {
+	userRepo := repository.NewUserRepository(db)
+	userService := service.NewUserService(userRepo)
+	userController := controller.NewUserController(userService, cfg.JWTSecret)
+
+	router.POST("/register", userController.Register)
+	router.POST("/login", userController.Login)
 }

@@ -1,4 +1,4 @@
-package app
+package auth
 
 import (
 	"errors"
@@ -41,5 +41,5 @@ func ValidateToken(cfg *config.Config, tokenStr string) (*Claims, error) {
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
 		return claims, nil
 	}
-	return nil, errors.New("недействительный токен")
+	return nil, errors.New("invalid token")
 }
