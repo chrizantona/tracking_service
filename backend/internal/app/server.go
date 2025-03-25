@@ -37,6 +37,7 @@ func NewServer(cfg *config.Config, logger *zap.Logger, db *sql.DB) *Server {
 	})
 
 	registerUserRoutes(router, cfg, db)
+	registerOrderRoutes(router, cfg, db)
 
 	srv := &http.Server{
 		Addr:           ":" + cfg.ServerPort,
@@ -70,4 +71,17 @@ func registerUserRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB) {
 
 	router.POST("/register", userController.Register)
 	router.POST("/login", userController.Login)
+}
+
+func registerOrderRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB) {
+	orderRepo := repository.NewOrderRepository(db)
+	userRepo := repository.NewUserRepository(db)
+	orderService := service.NewOrderService(orderRepo, userRepo)
+	orderController := controller.NewOrderController(orderService)
+
+	router.POST("/orders", orderController.CreateOrder)
+	router.GET("/orders", orderController.GetOrders)
+	router.GET("/orders/:id", orderController.GetOrder)
+	router.PUT("/orders/:id", orderController.UpdateOrder)
+	router.DELETE("/orders/:id", orderController.DeleteOrder)
 }
