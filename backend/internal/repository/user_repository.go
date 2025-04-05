@@ -24,8 +24,8 @@ func NewUserRepository(db *sql.DB) UserRepository {
 }
 
 func (r *userRepository) Create(user *entity.User) error {
-	if user.ID == "" {
-		user.ID = uuid.New().String()
+	if user.ID == uuid.Nil {
+		user.ID = uuid.New()
 	}
 	now := time.Now()
 	user.CreatedAt = now

@@ -56,7 +56,7 @@ func (uc *UserController) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
-	token, err := auth.GenerateToken(&config.Config{JWTSecret: uc.jwtSecret}, user.ID)
+	token, err := auth.GenerateToken(&config.Config{JWTSecret: uc.jwtSecret}, user.ID.String())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not generate token"})
 		return

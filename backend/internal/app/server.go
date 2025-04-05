@@ -5,15 +5,13 @@ import (
 	"database/sql"
 	"net/http"
 	"time"
-
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
-
 	"backend/config"
 	"backend/internal/controller"
 	"backend/internal/middleware"
 	"backend/internal/repository"
 	"backend/internal/service"
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type Server struct {
@@ -37,7 +35,7 @@ func NewServer(cfg *config.Config, logger *zap.Logger, db *sql.DB) *Server {
 	})
 
 	registerUserRoutes(router, cfg, db)
-	registerOrderRoutes(router, cfg, db)
+	registerOrderRoutes(router, cfg, db, logger)
 
 	srv := &http.Server{
 		Addr:           ":" + cfg.ServerPort,
@@ -73,10 +71,9 @@ func registerUserRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB) {
 	router.POST("/login", userController.Login)
 }
 
-func registerOrderRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB) {
-	orderRepo := repository.NewOrderRepository(db)
-	userRepo := repository.NewUserRepository(db)
-	orderService := service.NewOrderService(orderRepo, userRepo)
+func registerOrderRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB, logger *zap.Logger) {
+	orderRepo := repository.NewOrderRepository(db, logger)
+	orderService := service.NewOrderService(orderRepo)
 	orderController := controller.NewOrderController(orderService)
 
 	router.POST("/orders", orderController.CreateOrder)

@@ -2,6 +2,7 @@ package entity
 
 import (
 	"time"
+	"github.com/google/uuid"
 )
 
 type Role string
@@ -13,7 +14,7 @@ const (
 )
 
 type User struct {
-	ID           string    `json:"id"`
+	ID           uuid.UUID    `json:"id"`
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"-"` 
 	Role         Role      `json:"role"`

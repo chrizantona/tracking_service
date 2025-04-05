@@ -5,7 +5,9 @@ import (
 
 	"backend/internal/entity"
 	"backend/internal/service"
+
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type OrderController struct {
@@ -17,9 +19,9 @@ func NewOrderController(orderService service.OrderService) *OrderController {
 }
 
 type CreateOrderRequest struct {
-	ClientID        string `json:"client_id" binding:"required"`
-	DeliveryAddress string `json:"delivery_address" binding:"required"`
-	DeliveryCoords  string `json:"delivery_coords" binding:"required"`
+	ClientID        uuid.UUID `json:"client_id" binding:"required"`
+	DeliveryAddress string    `json:"delivery_address" binding:"required"`
+	DeliveryCoords  string    `json:"delivery_coords" binding:"required"`
 }
 
 func (oc *OrderController) CreateOrder(c *gin.Context) {
@@ -30,22 +32,29 @@ func (oc *OrderController) CreateOrder(c *gin.Context) {
 	}
 
 	order := &entity.Order{
+		ID:              uuid.New(), // Генерация нового UUID
 		ClientID:        req.ClientID,
 		Status:          entity.StatusCreated,
 		DeliveryAddress: req.DeliveryAddress,
 		DeliveryCoords:  req.DeliveryCoords,
 	}
 
-	if err := oc.orderService.CreateOrder(order); err != nil {
+	createdOrder, err := oc.orderService.CreateOrder(order)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusCreated, order)
+	c.JSON(http.StatusCreated, createdOrder)
 }
 
 func (oc *OrderController) GetOrder(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	id, err := uuid.Parse(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
 	order, err := oc.orderService.GetOrderByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -67,11 +76,16 @@ type UpdateOrderRequest struct {
 	Status          entity.OrderStatus `json:"status" binding:"required"`
 	DeliveryAddress string             `json:"delivery_address" binding:"required"`
 	DeliveryCoords  string             `json:"delivery_coords" binding:"required"`
-	// подумать над тем чтобы айдишник курьера передавать
 }
 
 func (oc *OrderController) UpdateOrder(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	id, err := uuid.Parse(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
+
 	var req UpdateOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -97,7 +111,12 @@ func (oc *OrderController) UpdateOrder(c *gin.Context) {
 }
 
 func (oc *OrderController) DeleteOrder(c *gin.Context) {
-	id := c.Param("id")
+	idParam := c.Param("id")
+	id, err := uuid.Parse(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
 	if err := oc.orderService.DeleteOrder(id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

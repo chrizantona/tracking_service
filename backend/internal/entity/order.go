@@ -2,6 +2,7 @@ package entity
 
 import (
 	"time"
+	"github.com/google/uuid"
 )
 
 type OrderStatus string
@@ -15,9 +16,9 @@ const (
 )
 
 type Order struct {
-	ID              string      `json:"id"`
-	ClientID        string      `json:"client_id"`
-	CourierID       *string     `json:"courier_id,omitempty"` 
+	ID              uuid.UUID      `json:"id"`
+	ClientID        uuid.UUID   `json:"client_id"`
+	CourierID       *uuid.UUID   `json:"courier_id,omitempty"` 
 	Status          OrderStatus `json:"status"`
 	DeliveryAddress string      `json:"delivery_address"`
 	DeliveryCoords  string      `json:"delivery_coords"` 

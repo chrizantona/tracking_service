@@ -10,6 +10,7 @@ import (
 	"backend/internal/controller"
 	"backend/internal/entity"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,7 +21,7 @@ func (f *fakeUserService) Register(email, password string) (*entity.User, error)
 		return nil, errors.New("user already exists")
 	}
 	return &entity.User{
-		ID:    "123",
+		ID:    uuid.MustParse("00000000-0000-0000-0000-000000000123"),
 		Email: email,
 		Role:  entity.RoleClient,
 	}, nil
@@ -29,7 +30,7 @@ func (f *fakeUserService) Register(email, password string) (*entity.User, error)
 func (f *fakeUserService) Login(email, password string) (*entity.User, error) {
 	if email == "test@example.com" && password == "password123" {
 		return &entity.User{
-			ID:    "123",
+			ID:    uuid.MustParse("00000000-0000-0000-0000-000000000123"),
 			Email: email,
 			Role:  entity.RoleClient,
 		}, nil
