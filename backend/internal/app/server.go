@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"net/http"
 	"time"
+
 	"backend/config"
 	"backend/internal/controller"
 	"backend/internal/middleware"
 	"backend/internal/repository"
 	"backend/internal/service"
+
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -36,6 +38,7 @@ func NewServer(cfg *config.Config, logger *zap.Logger, db *sql.DB) *Server {
 
 	registerUserRoutes(router, cfg, db)
 	registerOrderRoutes(router, cfg, db, logger)
+	registerCourierRoutes(router, cfg, db, logger)
 
 	srv := &http.Server{
 		Addr:           ":" + cfg.ServerPort,
@@ -81,4 +84,14 @@ func registerOrderRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB, log
 	router.GET("/orders/:id", orderController.GetOrder)
 	router.PUT("/orders/:id", orderController.UpdateOrder)
 	router.DELETE("/orders/:id", orderController.DeleteOrder)
+}
+
+func registerCourierRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB, logger *zap.Logger) {
+	courierRepo := repository.NewCourierRepository(db, logger)
+	courierService := service.NewCourierService(courierRepo, logger)
+	courierController := controller.NewCourierController(courierService)
+
+	router.GET("/couriers/:id", courierController.GetCourier)
+	router.PUT("/couriers/:id/status", courierController.UpdateStatus)
+	router.PUT("/couriers/:id/location", courierController.UpdateLocation)
 }
