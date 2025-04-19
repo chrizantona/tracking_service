@@ -2,10 +2,9 @@ package app
 
 import (
 	"context"
-	"database/sql"
+	"database/sql" // Возвращаем стандартный импорт
 	"net/http"
 	"time"
-
 	"backend/config"
 	"backend/internal/controller"
 	"backend/internal/middleware"
@@ -13,13 +12,14 @@ import (
 	"backend/internal/service"
 
 	"github.com/gin-gonic/gin"
+	// Удаляем импорт sqlx
 	"go.uber.org/zap"
 )
 
 type Server struct {
 	cfg    *config.Config
 	logger *zap.Logger
-	db     *sql.DB
+	db     *sql.DB 
 	router *gin.Engine
 	srv    *http.Server
 }
@@ -87,11 +87,15 @@ func registerOrderRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB, log
 }
 
 func registerCourierRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB, logger *zap.Logger) {
-	courierRepo := repository.NewCourierRepository(db, logger)
+	courierRepo := repository.NewCourierRepository(db, logger) 
 	courierService := service.NewCourierService(courierRepo, logger)
 	courierController := controller.NewCourierController(courierService)
 
-	router.GET("/couriers/:id", courierController.GetCourier)
-	router.PUT("/couriers/:id/status", courierController.UpdateStatus)
-	router.PUT("/couriers/:id/location", courierController.UpdateLocation)
+	courierRoutes := router.Group("/couriers")
+    {
+        courierRoutes.GET("/:id", courierController.GetCourier)
+        courierRoutes.PUT("/:id/status", courierController.UpdateStatus)
+        courierRoutes.PUT("/:id/location", courierController.UpdateLocation)
+        courierRoutes.GET("/nearest", courierController.FindNearestCouriers)
+    }
 }

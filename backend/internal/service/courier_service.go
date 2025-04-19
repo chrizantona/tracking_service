@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+
 	"backend/internal/entity"
 	"backend/internal/repository"
 	"github.com/google/uuid"
@@ -11,7 +12,8 @@ import (
 type CourierService interface {
 	GetCourierByID(id uuid.UUID) (*entity.Courier, error)
 	UpdateCourierStatus(id uuid.UUID, status entity.CourierStatus) error
-	UpdateCourierLocation(id uuid.UUID, location entity.Geometry) error
+	UpdateCourierLocation(id uuid.UUID, location *entity.Coordinates) error
+	FindNearestAvailable(latitude, longitude float64, radius float64) ([]*entity.Courier, error)
 }
 
 type courierService struct {
@@ -51,8 +53,14 @@ func (s *courierService) UpdateCourierStatus(id uuid.UUID, status entity.Courier
 	return nil
 }
 
-func (s *courierService) UpdateCourierLocation(id uuid.UUID, location entity.Geometry) error {
-	s.logger.Info("Updating courier location", zap.String("courier_id", id.String()), zap.String("location", string(location)))
+func (s *courierService) UpdateCourierLocation(id uuid.UUID, location *entity.Coordinates) error {
+	logLat, logLon := float64(0), float64(0)
+    if location != nil {
+        logLat = location.Latitude
+        logLon = location.Longitude
+    }
+	s.logger.Info("Updating courier location", zap.String("courier_id", id.String()), zap.Float64("lat", logLat), zap.Float64("lon", logLon))
+
 	courier, err := s.repo.GetByID(id)
 	if err != nil {
 		s.logger.Error("Courier not found for location update", zap.String("courier_id", id.String()), zap.Error(err))
@@ -64,4 +72,18 @@ func (s *courierService) UpdateCourierLocation(id uuid.UUID, location entity.Geo
 		return fmt.Errorf("failed to update courier location: %w", err)
 	}
 	return nil
+}
+
+func (s *courierService) FindNearestAvailable(latitude, longitude float64, radius float64) ([]*entity.Courier, error) {
+    s.logger.Info("Finding nearest available couriers", zap.Float64("lat", latitude), zap.Float64("lon", longitude), zap.Float64("radius", radius))
+
+    couriers, err := s.repo.FindNearestAvailable(latitude, longitude, radius)
+    if err != nil {
+        s.logger.Error("Failed to find nearest available couriers from repository", zap.Error(err))
+        return nil, fmt.Errorf("failed to find nearest available couriers: %w", err)
+    }
+
+    s.logger.Info("Successfully found nearest available couriers", zap.Int("count", len(couriers)))
+
+    return couriers, nil
 }

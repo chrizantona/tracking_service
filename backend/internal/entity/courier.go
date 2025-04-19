@@ -7,18 +7,20 @@ import (
 type CourierStatus string
 
 const (
-	CourierAvailable CourierStatus = "AVAILABLE"
-	CourierBusy      CourierStatus = "BUSY"
-	CourierOffline   CourierStatus = "OFFLINE"
+	CourierStatusAvailable CourierStatus = "AVAILABLE"
+	CourierStatusBusy      CourierStatus = "BUSY"
+	CourierStatusOffline   CourierStatus = "OFFLINE"
 )
 
-
-type Geometry string
+type Coordinates struct {
+	Latitude  float64
+	Longitude float64
+}
 
 type Courier struct {
-	UserID   uuid.UUID     `json:"user_id"`   
-	Name     string        `json:"name"`      
-	Status   CourierStatus `json:"status"`    
-	Location Geometry      `json:"location"`  
-	Rating   float64       `json:"rating"`    
+	UserID   uuid.UUID     `db:"user_id" json:"user_id"`
+	Name     string        `db:"name" json:"name"`
+	Status   CourierStatus `db:"status" json:"status"`
+	Location *Coordinates  `db:"location" json:"location"`
+	Rating   float64       `db:"rating" json:"rating"`
 }

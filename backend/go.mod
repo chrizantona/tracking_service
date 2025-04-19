@@ -1,14 +1,16 @@
 module backend
 
-go 1.23.1
+go 1.23.0
+
+toolchain go1.23.1
 
 require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
-	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
 	github.com/stretchr/testify v1.9.0
+	github.com/twpayne/go-geom v1.6.1
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.36.0
 )
@@ -40,6 +42,7 @@ require (
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

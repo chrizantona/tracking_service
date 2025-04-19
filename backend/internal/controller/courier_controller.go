@@ -57,7 +57,8 @@ func (cc *CourierController) UpdateStatus(c *gin.Context) {
 }
 
 type UpdateCourierLocationRequest struct {
-	Location entity.Geometry `json:"location" binding:"required"`
+	Latitude  float64 `json:"latitude" binding:"required"`
+	Longitude float64 `json:"longitude" binding:"required"`
 }
 
 func (cc *CourierController) UpdateLocation(c *gin.Context) {
@@ -72,9 +73,37 @@ func (cc *CourierController) UpdateLocation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := cc.service.UpdateCourierLocation(id, req.Location); err != nil {
+
+	location := &entity.Coordinates{
+        Latitude: req.Latitude,
+        Longitude: req.Longitude,
+    }
+
+	if err := cc.service.UpdateCourierLocation(id, location); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "location updated"})
+}
+
+type FindNearestRequest struct {
+	Latitude  float64 `form:"latitude" binding:"required"`
+	Longitude float64 `form:"longitude" binding:"required"`
+	Radius    float64 `form:"radius" binding:"required,gt=0"`
+}
+
+func (cc *CourierController) FindNearestCouriers(c *gin.Context) {
+	var req FindNearestRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	couriers, err := cc.service.FindNearestAvailable(req.Latitude, req.Longitude, req.Radius)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, couriers)
 }
