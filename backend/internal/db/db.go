@@ -5,11 +5,11 @@ import (
 
 	"backend/config"
 
-	_ "github.com/lib/pq" 
+	_ "github.com/lib/pq"
 )
 
 func Connect(cfg *config.Config) (*sql.DB, error) {
-	db, err := sql.Open("postgres", cfg.DBUrl)
+	db, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}

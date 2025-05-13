@@ -2,9 +2,10 @@ package app
 
 import (
 	"context"
-	"database/sql" // Возвращаем стандартный импорт
+	"database/sql"
 	"net/http"
 	"time"
+
 	"backend/config"
 	"backend/internal/controller"
 	"backend/internal/middleware"
@@ -12,23 +13,19 @@ import (
 	"backend/internal/service"
 
 	"github.com/gin-gonic/gin"
-	// Удаляем импорт sqlx
 	"go.uber.org/zap"
 )
 
 type Server struct {
 	cfg    *config.Config
 	logger *zap.Logger
-	db     *sql.DB 
-	router *gin.Engine
+	db     *sql.DB
 	srv    *http.Server
 }
 
 func NewServer(cfg *config.Config, logger *zap.Logger, db *sql.DB) *Server {
 	gin.SetMode(gin.ReleaseMode)
-
 	router := gin.New()
-
 	router.Use(middleware.ZapLogger(logger))
 	router.Use(gin.Recovery())
 
@@ -36,11 +33,27 @@ func NewServer(cfg *config.Config, logger *zap.Logger, db *sql.DB) *Server {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	registerUserRoutes(router, cfg, db)
-	registerOrderRoutes(router, cfg, db, logger)
-	registerCourierRoutes(router, cfg, db, logger)
 
-	srv := &http.Server{
+	userRepo    := repository.NewUserRepository(db)
+	orderRepo   := repository.NewOrderRepository(db, logger)
+	courierRepo := repository.NewCourierRepository(db, logger)
+
+
+	userSvc    := service.NewUserService(userRepo)
+	orderSvc   := service.NewOrderService(orderRepo, courierRepo) 
+	courierSvc := service.NewCourierService(courierRepo, logger)
+
+
+	userCtrl    := controller.NewUserController(userSvc, cfg.JWTSecret)
+	orderCtrl   := controller.NewOrderController(orderSvc)
+	courierCtrl := controller.NewCourierController(courierSvc)
+
+	registerUserRoutes(router, userCtrl)
+	registerOrderRoutes(router, orderCtrl)
+	registerCourierRoutes(router, courierCtrl)
+
+
+	httpSrv := &http.Server{
 		Addr:           ":" + cfg.ServerPort,
 		Handler:        router,
 		ReadTimeout:    5 * time.Second,
@@ -52,50 +65,38 @@ func NewServer(cfg *config.Config, logger *zap.Logger, db *sql.DB) *Server {
 		cfg:    cfg,
 		logger: logger,
 		db:     db,
-		router: router,
-		srv:    srv,
+		srv:    httpSrv,
 	}
 }
 
-func (s *Server) Start() error {
-	return s.srv.ListenAndServe()
+
+func (s *Server) Start() error               { return s.srv.ListenAndServe() }
+func (s *Server) Shutdown(ctx context.Context) error { return s.srv.Shutdown(ctx) }
+
+
+
+func registerUserRoutes(r *gin.Engine, uc *controller.UserController) {
+	r.POST("/register", uc.Register)
+	r.POST("/login", uc.Login)
 }
 
-func (s *Server) Shutdown(ctx context.Context) error {
-	return s.srv.Shutdown(ctx)
+func registerOrderRoutes(r *gin.Engine, oc *controller.OrderController) {
+	orders := r.Group("/orders")
+	{
+		orders.POST("", oc.CreateOrder)
+		orders.GET("", oc.GetOrders)
+		orders.GET("/:id", oc.GetOrder)
+		orders.PUT("/:id", oc.UpdateOrder)
+		orders.DELETE("/:id", oc.DeleteOrder)
+	}
 }
 
-func registerUserRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB) {
-	userRepo := repository.NewUserRepository(db)
-	userService := service.NewUserService(userRepo)
-	userController := controller.NewUserController(userService, cfg.JWTSecret)
-
-	router.POST("/register", userController.Register)
-	router.POST("/login", userController.Login)
-}
-
-func registerOrderRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB, logger *zap.Logger) {
-	orderRepo := repository.NewOrderRepository(db, logger)
-	orderService := service.NewOrderService(orderRepo)
-	orderController := controller.NewOrderController(orderService)
-
-	router.POST("/orders", orderController.CreateOrder)
-	router.GET("/orders", orderController.GetOrders)
-	router.GET("/orders/:id", orderController.GetOrder)
-	router.PUT("/orders/:id", orderController.UpdateOrder)
-	router.DELETE("/orders/:id", orderController.DeleteOrder)
-}
-
-func registerCourierRoutes(router *gin.Engine, cfg *config.Config, db *sql.DB, logger *zap.Logger) {
-	courierRepo := repository.NewCourierRepository(db, logger) 
-	courierService := service.NewCourierService(courierRepo, logger)
-	courierController := controller.NewCourierController(courierService)
-
-	courierRoutes := router.Group("/couriers")
-    {
-        courierRoutes.GET("/:id", courierController.GetCourier)
-        courierRoutes.PUT("/:id/status", courierController.UpdateStatus)
-        courierRoutes.PUT("/:id/location", courierController.UpdateLocation)
-        courierRoutes.GET("/nearest", courierController.FindNearestCouriers)
-    }
+func registerCourierRoutes(r *gin.Engine, cc *controller.CourierController) {
+	couriers := r.Group("/couriers")
+	{
+		couriers.GET("/nearest", cc.FindNearestCouriers)
+		couriers.GET("/:id", cc.GetCourier)
+		couriers.PUT("/:id/status", cc.UpdateStatus)
+		couriers.PUT("/:id/location", cc.UpdateLocation)
+	}
 }

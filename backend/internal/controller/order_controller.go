@@ -32,20 +32,19 @@ func (oc *OrderController) CreateOrder(c *gin.Context) {
 	}
 
 	order := &entity.Order{
-		ID:              uuid.New(), // Генерация нового UUID
+		ID:              uuid.New(),
 		ClientID:        req.ClientID,
 		Status:          entity.StatusCreated,
 		DeliveryAddress: req.DeliveryAddress,
 		DeliveryCoords:  req.DeliveryCoords,
 	}
 
-	createdOrder, err := oc.orderService.CreateOrder(order)
+	created, err := oc.orderService.CreateOrder(c.Request.Context(), order)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	c.JSON(http.StatusCreated, createdOrder)
+	c.JSON(http.StatusCreated, created)
 }
 
 func (oc *OrderController) GetOrder(c *gin.Context) {
@@ -55,6 +54,7 @@ func (oc *OrderController) GetOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
 		return
 	}
+
 	order, err := oc.orderService.GetOrderByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -64,12 +64,12 @@ func (oc *OrderController) GetOrder(c *gin.Context) {
 }
 
 func (oc *OrderController) GetOrders(c *gin.Context) {
-	orders, err := oc.orderService.GetAllOrders()
+	list, err := oc.orderService.GetAllOrders()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, orders)
+	c.JSON(http.StatusOK, list)
 }
 
 type UpdateOrderRequest struct {
@@ -106,7 +106,6 @@ func (oc *OrderController) UpdateOrder(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	c.JSON(http.StatusOK, order)
 }
 

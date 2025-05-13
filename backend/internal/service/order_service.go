@@ -1,7 +1,7 @@
 package service
 
 import (
-	"errors"
+	"context"
 	"fmt"
 
 	"backend/internal/entity"
@@ -11,7 +11,8 @@ import (
 )
 
 type OrderService interface {
-	CreateOrder(order *entity.Order) (*entity.Order, error)
+	CreateOrder(ctx context.Context, order *entity.Order) (*entity.Order, error)
+	AssignCourierToOrder(ctx context.Context, orderID uuid.UUID) error
 	GetOrderByID(id uuid.UUID) (*entity.Order, error)
 	GetAllOrders() ([]*entity.Order, error)
 	UpdateOrder(order *entity.Order) error
@@ -19,61 +20,72 @@ type OrderService interface {
 }
 
 type orderService struct {
-	repo repository.OrderRepository
+	orderRepo   repository.OrderRepository
+	courierRepo repository.CourierRepository
 }
 
-func NewOrderService(orderRepo repository.OrderRepository) OrderService {
-	return &orderService{repo: orderRepo}
+func NewOrderService(
+	orderRepo repository.OrderRepository,
+	courierRepo repository.CourierRepository,
+) OrderService {
+	return &orderService{
+		orderRepo:   orderRepo,
+		courierRepo: courierRepo,
+	}
 }
 
-func (s *orderService) CreateOrder(order *entity.Order) (*entity.Order, error) {
-	err := s.repo.Create(order)
-	if err != nil {
-		if errors.Is(err, repository.ErrClientNotFound) {
-			return nil, fmt.Errorf("failed to create order: %w", err)
-		}
-		return nil, fmt.Errorf("failed to create order in repository: %w", err)
+
+func (s *orderService) CreateOrder(ctx context.Context, order *entity.Order) (*entity.Order, error) {
+	if err := s.orderRepo.Create(order); err != nil {
+		return nil, fmt.Errorf("create order in repository: %w", err)
 	}
 	return order, nil
 }
 
 func (s *orderService) GetOrderByID(id uuid.UUID) (*entity.Order, error) {
-	order, err := s.repo.GetByID(id)
-	if err != nil {
-		if errors.Is(err, repository.ErrOrderNotFound) {
-			return nil, fmt.Errorf("order with id %s not found: %w", id, err)
-		}
-		return nil, fmt.Errorf("failed to get order %s: %w", id, err)
-	}
-	return order, nil
+	return s.orderRepo.GetByID(id)
 }
 
 func (s *orderService) GetAllOrders() ([]*entity.Order, error) {
-	orders, err := s.repo.GetAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get all orders: %w", err)
-	}
-	return orders, nil
+	return s.orderRepo.GetAll()
 }
 
 func (s *orderService) UpdateOrder(order *entity.Order) error {
-	err := s.repo.Update(order)
-	if err != nil {
-		if errors.Is(err, repository.ErrOrderNotFound) {
-			return fmt.Errorf("cannot update order %s: not found or no changes: %w", order.ID, err)
-		}
-		return fmt.Errorf("failed to update order %s: %w", order.ID, err)
-	}
-	return nil
+	return s.orderRepo.Update(order)
 }
 
 func (s *orderService) DeleteOrder(id uuid.UUID) error {
-	err := s.repo.Delete(id)
+	return s.orderRepo.Delete(id)
+}
+
+
+
+func (s *orderService) AssignCourierToOrder(ctx context.Context, orderID uuid.UUID) error {
+	order, err := s.orderRepo.GetByID(orderID)
 	if err != nil {
-		if errors.Is(err, repository.ErrOrderNotFound) {
-			return fmt.Errorf("cannot delete order %s: not found: %w", id, err)
-		}
-		return fmt.Errorf("failed to delete order %s: %w", id, err)
+		return fmt.Errorf("get order: %w", err)
 	}
+
+	lat, lon, err := order.ParseCoords()
+	if err != nil {
+		return fmt.Errorf("parse delivery coords: %w", err)
+	}
+
+	couriers, err := s.courierRepo.FindNearestAvailable(lat, lon, 5_000)
+	if err != nil {
+		return fmt.Errorf("find nearest couriers: %w", err)
+	}
+	if len(couriers) == 0 {
+		return fmt.Errorf("no available couriers found")
+	}
+
+	chosen := couriers[0]
+	order.CourierID = &chosen.UserID
+	order.Status = entity.StatusAssigned
+
+	if err := s.orderRepo.Update(order); err != nil {
+		return fmt.Errorf("assign courier to order: %w", err)
+	}
+
 	return nil
 }

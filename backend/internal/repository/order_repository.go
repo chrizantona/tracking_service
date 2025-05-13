@@ -3,9 +3,13 @@ package repository
 import (
 	"database/sql"
 	"errors"
-	"time"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
 	"backend/internal/entity"
+
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
@@ -23,191 +27,240 @@ type OrderRepository interface {
 
 type orderRepository struct {
 	db     *sql.DB
-	logger *zap.Logger 
+	logger *zap.Logger
 }
 
 func NewOrderRepository(db *sql.DB, logger *zap.Logger) OrderRepository {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &orderRepository{
-		db:     db,
-		logger: logger, 
-	}
+	return &orderRepository{db: db, logger: logger}
 }
 
 func (r *orderRepository) Create(order *entity.Order) error {
-	const op = "repository.OrderRepository.Create" 
-	l := r.logger.With(zap.String("operation", op)) 
+	const op = "OrderRepository.Create"
+	l := r.logger.With(zap.String("op", op))
+
+	// проверяем, что клиент есть
 	var exists int
-	err := r.db.QueryRow("SELECT 1 FROM users WHERE id = $1", order.ClientID).Scan(&exists)
-	if err != nil {
+	if err := r.db.QueryRow("SELECT 1 FROM users WHERE id = $1", order.ClientID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			l.Warn("client not found for new order", zap.String("client_id", order.ClientID.String()))
+			l.Warn("client not found", zap.String("client_id", order.ClientID.String()))
 			return fmt.Errorf("%s: %w", op, ErrClientNotFound)
 		}
-		l.Error("DB error checking client existence", zap.Error(err), zap.String("client_id", order.ClientID.String()))
-		return fmt.Errorf("%s: failed checking client existence: %w", op, err)
+		l.Error("db error checking client", zap.Error(err))
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
+	// генерируем ID, если нужно
 	if order.ID == uuid.Nil {
 		order.ID = uuid.New()
-		l.Debug("Generated new Order ID", zap.String("order_id", order.ID.String()))
 	}
 
-	now := time.Now().UTC() 
+	now := time.Now().UTC()
 	order.CreatedAt = now
 	order.UpdatedAt = now
 
+	// парсим "lat,lon"
+	parts := strings.Split(order.DeliveryCoords, ",")
+	if len(parts) != 2 {
+		return fmt.Errorf("%s: invalid coords format", op)
+	}
+	lat, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return fmt.Errorf("%s: parse lat: %w", op, err)
+	}
+	lon, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		return fmt.Errorf("%s: parse lon: %w", op, err)
+	}
+
+	// вставляем с помощью PostGIS-функции
 	query := `
-		INSERT INTO orders (id, client_id, courier_id, status, delivery_address, delivery_coords, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO orders (
+			id, client_id, courier_id, status,
+			delivery_address,
+			delivery_coords,
+			created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4,
+			$5,
+			ST_SetSRID(ST_MakePoint($6, $7), 4326),
+			$8, $9
+		)
 	`
 	_, err = r.db.Exec(query,
 		order.ID,
 		order.ClientID,
-		order.CourierID, 
+		order.CourierID,
 		order.Status,
 		order.DeliveryAddress,
-		order.DeliveryCoords,
+		lon, lat,
 		order.CreatedAt,
 		order.UpdatedAt,
 	)
 	if err != nil {
-		l.Error("Failed to insert order", zap.Error(err), zap.String("order_id", order.ID.String()))
-		return fmt.Errorf("%s: failed to insert order: %w", op, err) 
+		l.Error("failed to insert order", zap.Error(err))
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	l.Info("Order created successfully", zap.String("order_id", order.ID.String()))
+	l.Info("order created", zap.String("order_id", order.ID.String()))
 	return nil
 }
 
-
 func (r *orderRepository) GetByID(id uuid.UUID) (*entity.Order, error) {
-	const op = "repository.OrderRepository.GetByID"
-	l := r.logger.With(zap.String("operation", op), zap.String("order_id", id.String()))
+	const op = "OrderRepository.GetByID"
+	l := r.logger.With(zap.String("op", op), zap.String("order_id", id.String()))
 
 	query := `
-		SELECT id, client_id, courier_id, status, delivery_address, delivery_coords, created_at, updated_at
+		SELECT
+			id, client_id, courier_id, status,
+			delivery_address,
+			ST_AsText(delivery_coords) AS delivery_coords,
+			created_at, updated_at
 		FROM orders
 		WHERE id = $1
 	`
 	row := r.db.QueryRow(query, id)
+
 	var order entity.Order
-	err := row.Scan(
+	if err := row.Scan(
 		&order.ID,
 		&order.ClientID,
-		&order.CourierID, 
+		&order.CourierID,
 		&order.Status,
 		&order.DeliveryAddress,
 		&order.DeliveryCoords,
 		&order.CreatedAt,
 		&order.UpdatedAt,
-	)
-	if err != nil {
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			l.Warn("Order not found") 
-			return nil, ErrOrderNotFound 
+			return nil, ErrOrderNotFound
 		}
-		l.Error("Failed to scan order", zap.Error(err))
-		return nil, fmt.Errorf("%s: failed to scan order: %w", op, err) 
+		l.Error("failed to scan order", zap.Error(err))
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-	l.Debug("Order retrieved successfully") 
+
+	l.Debug("order fetched", zap.String("order_id", order.ID.String()))
 	return &order, nil
 }
 
 func (r *orderRepository) GetAll() ([]*entity.Order, error) {
-	const op = "repository.OrderRepository.GetAll"
-	l := r.logger.With(zap.String("operation", op))
+	const op = "OrderRepository.GetAll"
+	l := r.logger.With(zap.String("op", op))
+
 	query := `
-		SELECT id, client_id, courier_id, status, delivery_address, delivery_coords, created_at, updated_at
+		SELECT
+			id, client_id, courier_id, status,
+			delivery_address,
+			ST_AsText(delivery_coords) AS delivery_coords,
+			created_at, updated_at
 		FROM orders
-		ORDER BY created_at DESC -- Example ordering
-		-- Consider adding LIMIT and OFFSET for pagination here
+		ORDER BY created_at DESC
 	`
 	rows, err := r.db.Query(query)
 	if err != nil {
-		l.Error("Failed to query all orders", zap.Error(err))
-		return nil, fmt.Errorf("%s: failed to query all orders: %w", op, err)
+		l.Error("failed to query orders", zap.Error(err))
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-	defer rows.Close() 
+	defer rows.Close()
 
-	var orders []*entity.Order
+	var list []*entity.Order
 	for rows.Next() {
 		var order entity.Order
 		if err := rows.Scan(
-			&order.ID, &order.ClientID, &order.CourierID, &order.Status,
-			&order.DeliveryAddress, &order.DeliveryCoords, &order.CreatedAt, &order.UpdatedAt,
+			&order.ID,
+			&order.ClientID,
+			&order.CourierID,
+			&order.Status,
+			&order.DeliveryAddress,
+			&order.DeliveryCoords,
+			&order.CreatedAt,
+			&order.UpdatedAt,
 		); err != nil {
-			l.Error("Failed to scan order row during GetAll", zap.Error(err))
-			return nil, fmt.Errorf("%s: failed to scan order row: %w", op, err)
+			l.Error("failed to scan order row", zap.Error(err))
+			return nil, fmt.Errorf("%s: %w", op, err)
 		}
-		orders = append(orders, &order)
+		list = append(list, &order)
+	}
+	if err := rows.Err(); err != nil {
+		l.Error("rows iteration error", zap.Error(err))
+		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	if err = rows.Err(); err != nil {
-		l.Error("Error occurred during rows iteration for GetAll orders", zap.Error(err))
-		return nil, fmt.Errorf("%s: error iterating order rows: %w", op, err)
-	}
-
-	l.Debug("Successfully retrieved all orders", zap.Int("count", len(orders)))
-	return orders, nil
+	l.Debug("all orders fetched", zap.Int("count", len(list)))
+	return list, nil
 }
 
 func (r *orderRepository) Update(order *entity.Order) error {
-	const op = "repository.OrderRepository.Update"
-	l := r.logger.With(zap.String("operation", op), zap.String("order_id", order.ID.String()))
-	order.UpdatedAt = time.Now().UTC() 
+	const op = "OrderRepository.Update"
+	l := r.logger.With(zap.String("op", op), zap.String("order_id", order.ID.String()))
+
+	order.UpdatedAt = time.Now().UTC()
+
+	parts := strings.Split(order.DeliveryCoords, ",")
+	if len(parts) != 2 {
+		return fmt.Errorf("%s: invalid coords format", op)
+	}
+	lat, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return fmt.Errorf("%s: parse lat: %w", op, err)
+	}
+	lon, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		return fmt.Errorf("%s: parse lon: %w", op, err)
+	}
 
 	query := `
-		UPDATE orders
-		SET client_id = $2, courier_id = $3, status = $4, delivery_address = $5, delivery_coords = $6, updated_at = $7
+		UPDATE orders SET
+			client_id        = $2,
+			courier_id       = $3,
+			status           = $4,
+			delivery_address = $5,
+			delivery_coords  = ST_SetSRID(ST_MakePoint($6, $7), 4326),
+			updated_at       = $8
 		WHERE id = $1
 	`
 	res, err := r.db.Exec(query,
 		order.ID,
 		order.ClientID,
-		order.CourierID, 
+		order.CourierID,
 		order.Status,
 		order.DeliveryAddress,
-		order.DeliveryCoords,
+		lon, lat,
 		order.UpdatedAt,
 	)
 	if err != nil {
-		l.Error("Failed to execute order update", zap.Error(err))
-		return fmt.Errorf("%s: failed to execute order update: %w", op, err) 
+		l.Error("failed to update order", zap.Error(err))
+		return fmt.Errorf("%s: %w", op, err)
 	}
-	rowsAffected, err := res.RowsAffected()
+	n, err := res.RowsAffected()
 	if err != nil {
-		l.Error("Failed to get rows affected after order update", zap.Error(err))
-		return fmt.Errorf("%s: failed to get rows affected after update: %w", op, err) 
+		return fmt.Errorf("%s: %w", op, err)
 	}
-	if rowsAffected == 0 {
-		l.Warn("Attempted to update non-existent or unchanged order") 
-		return ErrOrderNotFound 
+	if n == 0 {
+		return ErrOrderNotFound
 	}
-	l.Info("Order updated successfully") 
+	l.Info("order updated", zap.String("order_id", order.ID.String()))
 	return nil
 }
 
 func (r *orderRepository) Delete(id uuid.UUID) error {
-	const op = "repository.OrderRepository.Delete"
-	l := r.logger.With(zap.String("operation", op), zap.String("order_id", id.String()))
-	query := `DELETE FROM orders WHERE id = $1`
-	res, err := r.db.Exec(query, id)
+	const op = "OrderRepository.Delete"
+	l := r.logger.With(zap.String("op", op), zap.String("order_id", id.String()))
+
+	res, err := r.db.Exec("DELETE FROM orders WHERE id = $1", id)
 	if err != nil {
-		l.Error("Failed to execute order delete", zap.Error(err))
-		return fmt.Errorf("%s: failed to execute order delete: %w", op, err) 
+		l.Error("failed to delete order", zap.Error(err))
+		return fmt.Errorf("%s: %w", op, err)
 	}
-	rowsAffected, err := res.RowsAffected()
+	n, err := res.RowsAffected()
 	if err != nil {
-		l.Error("Failed to get rows affected after order delete", zap.Error(err))
-		return fmt.Errorf("%s: failed to get rows affected after delete: %w", op, err) 
+		return fmt.Errorf("%s: %w", op, err)
 	}
-	if rowsAffected == 0 {
-		l.Warn("Attempted to delete non-existent order") 
-		return ErrOrderNotFound 
+	if n == 0 {
+		return ErrOrderNotFound
 	}
-	l.Info("Order deleted successfully") 
+	l.Info("order deleted", zap.String("order_id", id.String()))
 	return nil
 }

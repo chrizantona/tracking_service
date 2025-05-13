@@ -2,14 +2,17 @@ package config_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
 	"backend/internal/controller"
 	"backend/internal/entity"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -26,7 +29,7 @@ func newFakeOrderService() *fakeOrderService {
 	}
 }
 
-func (f *fakeOrderService) CreateOrder(order *entity.Order) (*entity.Order, error) {
+func (f *fakeOrderService) CreateOrder(ctx context.Context, order *entity.Order) (*entity.Order, error) {
 	if f.failClientCheck {
 		return nil, errors.New("client does not exist")
 	}
@@ -36,6 +39,10 @@ func (f *fakeOrderService) CreateOrder(order *entity.Order) (*entity.Order, erro
 	order.UpdatedAt = now
 	f.orders[order.ID] = order
 	return order, nil
+}
+
+func (f *fakeOrderService) AssignCourierToOrder(ctx context.Context, orderID uuid.UUID) error {
+	return nil
 }
 
 func (f *fakeOrderService) GetOrderByID(id uuid.UUID) (*entity.Order, error) {
@@ -48,8 +55,8 @@ func (f *fakeOrderService) GetOrderByID(id uuid.UUID) (*entity.Order, error) {
 
 func (f *fakeOrderService) GetAllOrders() ([]*entity.Order, error) {
 	var orders []*entity.Order
-	for _, order := range f.orders {
-		orders = append(orders, order)
+	for _, o := range f.orders {
+		orders = append(orders, o)
 	}
 	return orders, nil
 }
@@ -98,8 +105,10 @@ func TestCreateOrder_ValidData(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/orders", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
+
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusCreated, w.Code)
+
 	var order entity.Order
 	err := json.Unmarshal(w.Body.Bytes(), &order)
 	assert.NoError(t, err)
@@ -110,10 +119,12 @@ func TestCreateOrder_ValidData(t *testing.T) {
 func TestCreateOrder_ClientNotFound(t *testing.T) {
 	fakeSvc := newFakeOrderService()
 	fakeSvc.failClientCheck = true
+
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	oc := controller.NewOrderController(fakeSvc)
 	router.POST("/orders", oc.CreateOrder)
+
 	reqBody := map[string]string{
 		"client_id":        uuid.New().String(),
 		"delivery_address": "123 Main St",
@@ -123,6 +134,7 @@ func TestCreateOrder_ClientNotFound(t *testing.T) {
 	req, _ := http.NewRequest("POST", "/orders", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
+
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
@@ -131,6 +143,7 @@ func TestGetOrder_NotFound(t *testing.T) {
 	router := setupOrderRouter()
 	req, _ := http.NewRequest("GET", "/orders/"+uuid.New().String(), nil)
 	w := httptest.NewRecorder()
+
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
@@ -138,33 +151,35 @@ func TestGetOrder_NotFound(t *testing.T) {
 func TestUpdateOrder(t *testing.T) {
 	router := setupOrderRouter()
 	clientID := uuid.New().String()
-	reqBody := map[string]string{
+
+	createBody, _ := json.Marshal(map[string]string{
 		"client_id":        clientID,
 		"delivery_address": "123 Main St",
 		"delivery_coords":  "37.7749,-122.4194",
-	}
-	body, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequest("POST", "/orders", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusCreated, w.Code)
+	})
+	createReq, _ := http.NewRequest("POST", "/orders", bytes.NewBuffer(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	assert.Equal(t, http.StatusCreated, createRec.Code)
+
 	var order entity.Order
-	err := json.Unmarshal(w.Body.Bytes(), &order)
+	err := json.Unmarshal(createRec.Body.Bytes(), &order)
 	assert.NoError(t, err)
-	updateReq := map[string]interface{}{
+
+	updateBody, _ := json.Marshal(map[string]interface{}{
 		"status":           string(entity.StatusAssigned),
 		"delivery_address": "456 Elm St",
 		"delivery_coords":  "40.7128,-74.0060",
-	}
-	updateBody, _ := json.Marshal(updateReq)
-	reqUpdate, _ := http.NewRequest("PUT", "/orders/"+order.ID.String(), bytes.NewBuffer(updateBody))
-	reqUpdate.Header.Set("Content-Type", "application/json")
-	wUpdate := httptest.NewRecorder()
-	router.ServeHTTP(wUpdate, reqUpdate)
-	assert.Equal(t, http.StatusOK, wUpdate.Code)
+	})
+	updateReq, _ := http.NewRequest("PUT", "/orders/"+order.ID.String(), bytes.NewBuffer(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	router.ServeHTTP(updateRec, updateReq)
+
+	assert.Equal(t, http.StatusOK, updateRec.Code)
 	var updatedOrder entity.Order
-	err = json.Unmarshal(wUpdate.Body.Bytes(), &updatedOrder)
+	err = json.Unmarshal(updateRec.Body.Bytes(), &updatedOrder)
 	assert.NoError(t, err)
 	assert.Equal(t, entity.StatusAssigned, updatedOrder.Status)
 	assert.Equal(t, "456 Elm St", updatedOrder.DeliveryAddress)
@@ -173,26 +188,29 @@ func TestUpdateOrder(t *testing.T) {
 func TestDeleteOrder(t *testing.T) {
 	router := setupOrderRouter()
 	clientID := uuid.New().String()
-	reqBody := map[string]string{
+
+	createBody, _ := json.Marshal(map[string]string{
 		"client_id":        clientID,
 		"delivery_address": "123 Main St",
 		"delivery_coords":  "37.7749,-122.4194",
-	}
-	body, _ := json.Marshal(reqBody)
-	req, _ := http.NewRequest("POST", "/orders", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusCreated, w.Code)
+	})
+	createReq, _ := http.NewRequest("POST", "/orders", bytes.NewBuffer(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	assert.Equal(t, http.StatusCreated, createRec.Code)
+
 	var order entity.Order
-	err := json.Unmarshal(w.Body.Bytes(), &order)
+	err := json.Unmarshal(createRec.Body.Bytes(), &order)
 	assert.NoError(t, err)
-	reqDelete, _ := http.NewRequest("DELETE", "/orders/"+order.ID.String(), nil)
-	wDelete := httptest.NewRecorder()
-	router.ServeHTTP(wDelete, reqDelete)
-	assert.Equal(t, http.StatusOK, wDelete.Code)
-	reqGet, _ := http.NewRequest("GET", "/orders/"+order.ID.String(), nil)
-	wGet := httptest.NewRecorder()
-	router.ServeHTTP(wGet, reqGet)
-	assert.Equal(t, http.StatusNotFound, wGet.Code)
+
+	delReq, _ := http.NewRequest("DELETE", "/orders/"+order.ID.String(), nil)
+	delRec := httptest.NewRecorder()
+	router.ServeHTTP(delRec, delReq)
+	assert.Equal(t, http.StatusOK, delRec.Code)
+
+	getReq, _ := http.NewRequest("GET", "/orders/"+order.ID.String(), nil)
+	getRec := httptest.NewRecorder()
+	router.ServeHTTP(getRec, getReq)
+	assert.Equal(t, http.StatusNotFound, getRec.Code)
 }
